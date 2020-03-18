@@ -25,6 +25,7 @@ namespace SkiaSharp.Extended.Svg
 		private static readonly Regex urlRe = new Regex(@"url\s*\(\s*#([^\)]+)\)");
 		private static readonly Regex keyValueRe = new Regex(@"\s*([\w-]+)\s*:\s*(.*)");
 		private static readonly Regex WSRe = new Regex(@"\s{2,}");
+		private readonly Dictionary<string, SKTypeface> CustomTypefaces = new Dictionary<string, SKTypeface>();
 
 		private readonly Dictionary<string, XElement> defs = new Dictionary<string, XElement>();
 		private readonly Dictionary<string, ISKSvgFill> fillDefs = new Dictionary<string, ISKSvgFill>();
@@ -73,6 +74,8 @@ namespace SkiaSharp.Extended.Svg
 
 		public string Version { get; private set; }
 
+		
+
 		public SKPicture Load(string filename)
 		{
 			using (var stream = File.OpenRead(filename))
@@ -92,6 +95,15 @@ namespace SkiaSharp.Extended.Svg
 		public SKPicture Load(XmlReader reader)
 		{
 			return Load(XDocument.Load(reader));
+		}
+
+		public void AddCustomTypeface(string fontFamilyName, SKTypeface typeface)
+		{
+			if (typeface == null)
+			{
+				return;
+			}
+			CustomTypefaces.Add(fontFamilyName, typeface);
 		}
 
 		private static XmlParserContext CreateSvgXmlContext()
@@ -373,6 +385,19 @@ namespace SkiaSharp.Extended.Svg
 				case "description":
 					// already read earlier
 					break;
+				case "svg":
+					var sx = ReadNumber(e.Attribute("x"));
+					var sy = ReadNumber(e.Attribute("y"));
+					var selementSize = ReadElementSize(e);
+					var sbounds = SKRect.Create(new SKPoint(sx, sy), selementSize);
+					SKSvg svg = new SKSvg(selementSize);
+					foreach (var fontkvp in CustomTypefaces)
+					{
+						svg.AddCustomTypeface(fontkvp.Key, fontkvp.Value);
+					}
+					svg.Load(e.CreateReader());
+					canvas.DrawPicture(svg.Picture, sx, sy);
+					break;
 				default:
 					LogOrThrow($"SVG element '{elementName}' is not supported");
 					break;
@@ -589,8 +614,20 @@ namespace SkiaSharp.Extended.Svg
 			var fwidth = ReadFontWidth(fontStyle, paint.Typeface?.FontWidth ?? (int)SKFontStyleWidth.Normal);
 			var fstyle = ReadFontStyle(fontStyle, paint.Typeface?.FontSlant ?? SKFontStyleSlant.Upright);
 
-			paint.Typeface = SKTypeface.FromFamilyName(ffamily, fweight, fwidth, fstyle);
-
+			SKTypeface typeface = null;
+			if (!string.IsNullOrWhiteSpace(ffamily))
+			{
+				CustomTypefaces.TryGetValue(ffamily.Split(new char[] { ',', ' ' })[0], out typeface);
+			}
+			if (typeface != null)
+			{
+				paint.Typeface = typeface;
+			}
+			else
+			{
+				paint.Typeface = SKTypeface.FromFamilyName(ffamily, fweight, fwidth, fstyle);
+			}
+			
 			if (fontStyle != null && fontStyle.TryGetValue("font-size", out string fsize) && !string.IsNullOrWhiteSpace(fsize))
 				paint.TextSize = ReadNumber(fsize);
 		}
